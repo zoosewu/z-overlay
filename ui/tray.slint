@@ -1,0 +1,35 @@
+export component Tray inherits SystemTrayIcon {
+    // The notification area draws the icon straight onto the taskbar, so the
+    // glyph is picked to contrast with it and to match the icon size Windows
+    // asks for. Both are decided in Rust and pushed in here.
+    in property <bool> light-taskbar;
+    in property <bool> small-icon;
+
+    icon: root.light-taskbar
+        ? (root.small-icon ? @image-url("../assets/tray-light-16.png") : @image-url("../assets/tray-light-32.png"))
+        : (root.small-icon ? @image-url("../assets/tray-dark-16.png") : @image-url("../assets/tray-dark-32.png"));
+    tooltip: "z-overlay";
+
+    callback show-window();
+    callback exit();
+
+    clicked => {
+        root.show-window();
+    }
+
+    Menu {
+        MenuItem {
+            title: @tr("Show");
+            activated => {
+                root.show-window();
+            }
+        }
+
+        MenuItem {
+            title: @tr("Exit");
+            activated => {
+                root.exit();
+            }
+        }
+    }
+}
