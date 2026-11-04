@@ -29,6 +29,8 @@ Download `z-overlay.exe` from the [latest release](https://github.com/zoosewu/z-
 
 Settings are saved immediately to `settings.json` beside `z-overlay.exe`, and added images are copied into the `images` folder beside it, so the folder can be moved or copied as a whole. The folder must be writable. Moving it while **Start with Windows** is on is fine: the startup entry is updated the next time z-overlay starts.
 
+z-overlay checks GitHub for a newer release shortly after it starts and every six hours. When one is out, a dot appears on the **Settings** tab and the bottom right of that tab offers **Update and restart**, which downloads the new `z-overlay.exe`, verifies its SHA-256 checksum, replaces the running copy and starts it again. Settings and images are kept. Nothing pops up, and a failed check is simply retried later.
+
 The tray icon remains visible while z-overlay is running. Minimize or close the window to hide it; left-click the tray icon to restore it, or right-click and choose **Exit** to quit. Only one instance can run at a time; launching it again restores the existing window.
 
 ## Build

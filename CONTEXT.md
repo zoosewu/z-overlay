@@ -35,3 +35,7 @@ The folder containing `z-overlay.exe`. It holds `settings.json` and the `images/
 ## Overlay editor
 
 The page in z-overlay's window that lists a managed application's overlays and groups and shows a scaled preview canvas on which overlays are dragged into place.
+
+## Update
+
+A newer release found on GitHub. It is offered only at the bottom right of the Settings tab; installing it replaces `z-overlay.exe` in the portable folder, keeping the previous one as `z-overlay.exe.old` until the new one starts and removes it.

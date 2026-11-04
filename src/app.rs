@@ -2,6 +2,7 @@ use crate::editor::{self, EditorState};
 use crate::host::{ForegroundTracker, OverlayHost, RenderCache};
 use crate::keys;
 use crate::processes::{ProcessChoice, enumerate_processes};
+use crate::updater;
 use crate::{MainWindow, ManagedEntry, PromptKind, Tray};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{ComponentHandle, ModelRc, StandardListViewItem, Timer, TimerMode, VecModel};
@@ -112,6 +113,7 @@ pub fn run(start_minimized: bool, show_event: NamedEvent) -> Result<()> {
     }
     connect(&ui, &state);
     editor::connect(&ui, &state);
+    updater::start(&ui);
 
     let tick_timer = Timer::default();
     tick_timer.start(TimerMode::Repeated, TICK_INTERVAL, {

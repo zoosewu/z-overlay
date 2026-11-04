@@ -6,13 +6,14 @@ mod editor;
 mod host;
 mod keys;
 mod processes;
+mod updater;
 
 use std::ptr::null_mut;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ASFW_ANY, AllowSetForegroundWindow, MB_ICONERROR, MB_OK, MessageBoxW,
 };
 use z_overlay::Result;
-use z_overlay::system::{MINIMIZED_ARG, NamedEvent, claim_single_instance, wide};
+use z_overlay::system::{MINIMIZED_ARG, NamedEvent, SingleInstance, claim_single_instance, wide};
 
 slint::include_modules!();
 
@@ -28,7 +29,8 @@ fn main() {
 fn run() -> Result<()> {
     let start_minimized = std::env::args_os().any(|arg| arg == MINIMIZED_ARG);
     let show_event = NamedEvent::open_or_create(SHOW_EVENT)?;
-    let Some(_instance) = claim_single_instance(INSTANCE_MUTEX)? else {
+    let updated = std::env::args_os().any(|arg| arg == updater::UPDATED_ARG);
+    let Some(_instance) = claim_instance(updated)? else {
         if !start_minimized {
             // Whoever launched this copy may bring windows forward; pass that on
             // to the running copy so its window comes to the front.
@@ -37,7 +39,24 @@ fn run() -> Result<()> {
         }
         return Ok(());
     };
+    if updated {
+        updater::clean_up_after_update();
+    }
     app::run(start_minimized, show_event)
+}
+
+/// After an update the previous version is still closing, so wait for it.
+fn claim_instance(updated: bool) -> Result<Option<SingleInstance>> {
+    let attempts = if updated { 100 } else { 1 };
+    for attempt in 1..=attempts {
+        if let Some(instance) = claim_single_instance(INSTANCE_MUTEX)? {
+            return Ok(Some(instance));
+        }
+        if attempt < attempts {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    Ok(None)
 }
 
 fn show_error(text: &str) {

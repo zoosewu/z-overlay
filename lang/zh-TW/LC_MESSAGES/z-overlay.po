@@ -236,3 +236,18 @@ msgstr "顯示"
 
 msgid "Exit"
 msgstr "結束"
+
+msgid "z-overlay {} is available"
+msgstr "z-overlay {} 已推出"
+
+msgid "Downloading z-overlay {}…"
+msgstr "正在下載 z-overlay {}…"
+
+msgid "Could not update: {}"
+msgstr "無法更新：{}"
+
+msgid "Retry"
+msgstr "重試"
+
+msgid "Update and restart"
+msgstr "更新並重新啟動"

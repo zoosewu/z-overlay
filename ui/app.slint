@@ -27,6 +27,13 @@ export enum PromptKind {
     confirm-remove,
 }
 
+export enum UpdateState {
+    none,
+    available,
+    downloading,
+    failed,
+}
+
 export struct ManagedEntry {
     label: string,
     overlays: int,
@@ -48,6 +55,10 @@ export component MainWindow inherits Window {
     in-out property <bool> start-minimized;
     in-out property <int> language-index;
     in property <string> settings-folder;
+    in property <string> version;
+    in property <string> update-version;
+    in-out property <UpdateState> update-state;
+    in property <string> update-error;
 
     in-out property <bool> overlay-editor-open;
 
@@ -74,9 +85,23 @@ export component MainWindow inherits Window {
     callback start-minimized-toggled(enabled: bool);
     callback language-selected(index: int);
     callback open-settings-folder();
+    callback update-clicked();
 
     pure function summary(entry: ManagedEntry) -> string {
         return @tr("{n} overlay" | "{n} overlays" % entry.overlays) + " · " + @tr("{n} group" | "{n} groups" % entry.groups);
+    }
+
+    pure function update-message() -> string {
+        if root.update-state == UpdateState.available {
+            return @tr("z-overlay {} is available", root.update-version);
+        }
+        if root.update-state == UpdateState.downloading {
+            return @tr("Downloading z-overlay {}…", root.update-version);
+        }
+        if root.update-state == UpdateState.failed {
+            return @tr("Could not update: {}", root.update-error);
+        }
+        return "z-overlay " + root.version;
     }
 
     pure function prompt-message(kind: PromptKind, detail: string) -> string {
@@ -257,74 +282,101 @@ export component MainWindow inherits Window {
             }
 
             Tab {
-                title: @tr("Settings");
+                // The dot points at the update offered on this tab.
+                title: root.update-state == UpdateState.none ? @tr("Settings") : @tr("Settings") + " •";
 
                 VerticalLayout {
                     padding: 12px;
                     spacing: 12px;
-                    alignment: start;
 
-                    CheckBox {
-                        text: @tr("Start with Windows");
-                        checked <=> root.start-with-windows;
-                        toggled => {
-                            root.start-with-windows-toggled(self.checked);
-                        }
-                    }
-
-                    // Indented to line up with the check box label above.
-                    HorizontalLayout {
-                        padding-left: 28px;
+                    VerticalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        vertical-stretch: 1;
 
                         CheckBox {
-                            text: @tr("Start minimized to the tray");
-                            enabled: root.start-with-windows;
-                            checked <=> root.start-minimized;
+                            text: @tr("Start with Windows");
+                            checked <=> root.start-with-windows;
                             toggled => {
-                                root.start-minimized-toggled(self.checked);
+                                root.start-with-windows-toggled(self.checked);
                             }
                         }
-                    }
 
-                    Text {
-                        text: @tr("Language");
-                        color: Palette.foreground;
-                    }
+                        // Indented to line up with the check box label above.
+                        HorizontalLayout {
+                            padding-left: 28px;
 
-                    HorizontalLayout {
-                        alignment: start;
-
-                        // Fixed height: the combo box otherwise reports its drop-down
-                        // list as part of its preferred height.
-                        ComboBox {
-                            min-width: 220px;
-                            height: 32px;
-                            model: [@tr("System default"), "English", "繁體中文"];
-                            current-index <=> root.language-index;
-                            selected(value) => {
-                                root.language-selected(self.current-index);
+                            CheckBox {
+                                text: @tr("Start minimized to the tray");
+                                enabled: root.start-with-windows;
+                                checked <=> root.start-minimized;
+                                toggled => {
+                                    root.start-minimized-toggled(self.checked);
+                                }
                             }
                         }
-                    }
 
-                    Text {
-                        text: @tr("Settings folder");
-                        color: Palette.foreground;
+                        Text {
+                            text: @tr("Language");
+                            color: Palette.foreground;
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+
+                            // Fixed height: the combo box otherwise reports its drop-down
+                            // list as part of its preferred height.
+                            ComboBox {
+                                min-width: 220px;
+                                height: 32px;
+                                model: [@tr("System default"), "English", "繁體中文"];
+                                current-index <=> root.language-index;
+                                selected(value) => {
+                                    root.language-selected(self.current-index);
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Settings folder");
+                            color: Palette.foreground;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            LineEdit {
+                                horizontal-stretch: 1;
+                                read-only: true;
+                                text: root.settings-folder;
+                            }
+
+                            Button {
+                                text: @tr("Open");
+                                clicked => {
+                                    root.open-settings-folder();
+                                }
+                            }
+                        }
                     }
 
                     HorizontalLayout {
                         spacing: 8px;
+                        alignment: end;
 
-                        LineEdit {
-                            horizontal-stretch: 1;
-                            read-only: true;
-                            text: root.settings-folder;
+                        Text {
+                            text: root.update-message();
+                            color: root.update-state == UpdateState.failed ? #e03030 : Palette.foreground;
+                            opacity: root.update-state == UpdateState.none ? 0.6 : 1;
+                            vertical-alignment: center;
+                            overflow: elide;
                         }
 
-                        Button {
-                            text: @tr("Open");
+                        if root.update-state == UpdateState.available || root.update-state == UpdateState.failed: Button {
+                            text: root.update-state == UpdateState.failed ? @tr("Retry") : @tr("Update and restart");
+                            primary: root.update-state == UpdateState.available;
                             clicked => {
-                                root.open-settings-folder();
+                                root.update-clicked();
                             }
                         }
                     }
