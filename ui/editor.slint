@@ -5,14 +5,27 @@ import {
     LineEdit,
     ListView,
     Palette,
-    SpinBox,
-    TextEdit,
 } from "std-widgets.slint";
+
+// One line of the hierarchy: the "No group" heading, a group, or an overlay.
+export struct TreeRow {
+    // 0: no-group heading, 1: group, 2: overlay.
+    kind: int,
+    // The group's index for a group, the overlay's index for an overlay.
+    index: int,
+    // An overlay in a group sits one level in.
+    nested: bool,
+    name: string,
+    enabled: bool,
+    // Group only: its number, its number's hotkey, and whether it is held.
+    number: int,
+    hotkey: string,
+    hold: bool,
+}
 
 export struct OverlayRow {
     name: string,
     enabled: bool,
-    group: string,
     preview: image,
     // Position and size in pixels of the preview frame.
     x: float,
@@ -23,107 +36,41 @@ export struct OverlayRow {
     failed: bool,
 }
 
-export struct GroupRow {
-    name: string,
-    hotkey: string,
-}
-
 // The overlay editor's state; Rust keeps it in sync with the settings.
 export global Editor {
     in property <string> title;
+    in property <[TreeRow]> rows;
+    // Preview of every overlay, by overlay index.
     in property <[OverlayRow]> overlays;
+    // The selected overlay's index.
     in-out property <int> selected: -1;
-    in property <[GroupRow]> groups;
-    in-out property <int> selected-group: -1;
-    in property <int> recording-group: -1;
-    // "No group" followed by the group names.
-    in property <[string]> group-choices;
-    out property <string> no-group-label: @tr("No group");
     in property <int> preview-width: 1920;
     in property <int> preview-height: 1080;
     in-out property <int> preview-index;
-
-    // The selected overlay's fields.
-    in-out property <string> name;
-    in property <bool> is-text;
-    in-out property <string> text;
-    in-out property <string> font;
-    in-out property <int> font-size;
-    in-out property <string> color;
-    in property <color> color-value;
-    in-out property <string> background;
-    in property <color> background-value;
-    in-out property <int> padding;
-    in property <string> image-path;
-    in property <string> render-error;
-    in-out property <int> group-index;
-    in-out property <int> anchor;
-    in-out property <int> align;
-    in-out property <int> offset-x;
-    in-out property <int> offset-y;
-    in-out property <int> scale;
-    in-out property <int> opacity;
-
-    // The selected group's name.
-    in-out property <string> group-name;
+    in property <bool> on-screen;
+    out property <string> on-screen-hint: @tr("Drag to move · Right-click for details · Esc to finish");
 
     callback close();
     callback preview-selected(index: int);
-    callback select(index: int);
-    callback enabled-toggled(index: int, enabled: bool);
+    callback toggle-on-screen();
+    callback select(overlay: int);
+    // Opens the details of an overlay next to the pointer.
+    callback inspect(overlay: int);
+    callback enabled-toggled(overlay: int, enabled: bool);
     callback add-text(name: string);
     callback add-image();
-    callback duplicate(index: int);
-    callback remove(index: int);
-    callback edited();
-    callback choose-image();
-    callback dragged(index: int, x: float, y: float);
-    callback select-group(index: int);
     callback add-group(name: string);
-    callback remove-group(index: int);
-    callback group-renamed(index: int, name: string);
-    callback record-hotkey(index: int);
-    callback clear-hotkey(index: int);
-}
-
-component SectionTitle inherits Text {
-    color: Palette.foreground;
-    font-weight: 600;
-}
-
-component FieldLabel inherits Text {
-    color: Palette.foreground;
-    vertical-alignment: center;
-}
-
-component Swatch inherits Rectangle {
-    in property <color> value;
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: Palette.border;
-    // A checker behind the colour shows its transparency.
-    clip: true;
-    Rectangle {
-        x: 0;
-        y: 0;
-        width: 12px;
-        height: 12px;
-        background: #ccc;
-    }
-
-    Rectangle {
-        x: 12px;
-        y: 12px;
-        width: 12px;
-        height: 12px;
-        background: #ccc;
-    }
-
-    Rectangle {
-        background: root.value;
-    }
+    callback duplicate(overlay: int);
+    callback remove(overlay: int);
+    // An overlay was dragged in the preview; (x, y) is its new top-left corner.
+    callback dragged(overlay: int, x: float, y: float);
+    // An overlay was dropped in the hierarchy before row `target` (or after the last).
+    callback row-dropped(overlay: int, target: int);
+    callback group-enabled(group: int, enabled: bool);
+    callback group-renamed(group: int, name: string);
+    callback group-number(group: int, number: int);
+    callback group-mode-toggled(group: int);
+    callback remove-group(group: int);
 }
 
 component Canvas inherits Rectangle {
@@ -180,6 +127,11 @@ component Canvas inherits Rectangle {
             TouchArea {
                 mouse-cursor: move;
                 pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                        Editor.select(index);
+                        Editor.inspect(index);
+                        return;
+                    }
                     if event.button != PointerEventButton.left {
                         return;
                     }
@@ -202,534 +154,162 @@ component Canvas inherits Rectangle {
     }
 }
 
-component OverlayList inherits VerticalLayout {
-    spacing: 6px;
+component RowButton inherits Button {
+    height: 26px;
+}
 
-    SectionTitle {
-        text: @tr("Overlays");
-    }
+component Hierarchy inherits Rectangle {
+    // Rows are this tall, so a drag can tell which row the pointer is over.
+    property <length> row-height: 36px;
+    // The row a dragged overlay would land before, or -1.
+    property <int> drop-target: -1;
+    // The overlay being dragged, or -1.
+    property <int> dragging: -1;
 
-    Rectangle {
-        vertical-stretch: 1;
-        min-height: 120px;
-        border-color: Palette.border;
-        border-width: 1px;
-        border-radius: 4px;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 4px;
 
-        ListView {
-            x: 1px;
-            y: 1px;
-            width: parent.width - 2px;
-            height: parent.height - 2px;
+    ListView {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
 
-            for row[index] in Editor.overlays: Rectangle {
-                height: 34px;
-                background: index == Editor.selected ? Palette.selection-background : transparent;
+        for row[position] in Editor.rows: Rectangle {
+            height: root.row-height;
+            background: row.kind == 2 && row.index == Editor.selected ? Palette.selection-background : transparent;
 
-                TouchArea {
-                    clicked => {
-                        Editor.select(index);
-                    }
-                }
+            // A line where the dragged overlay will land.
+            if position == root.drop-target && position > 0: Rectangle {
+                y: 0;
+                height: 2px;
+                background: Palette.accent-background;
+            }
+            if position == Editor.rows.length - 1 && root.drop-target == Editor.rows.length: Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                background: Palette.accent-background;
+            }
 
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 10px;
-                    spacing: 6px;
-
-                    CheckBox {
-                        checked: row.enabled;
-                        toggled => {
-                            Editor.enabled-toggled(index, self.checked);
+            // Overlays are picked up and dropped; groups and the heading only receive them.
+            touch := TouchArea {
+                enabled: row.kind == 2;
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                        Editor.select(row.index);
+                        Editor.inspect(row.index);
+                    } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                        Editor.select(row.index);
+                    } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                        if root.dragging >= 0 && root.drop-target >= 0 {
+                            Editor.row-dropped(root.dragging, root.drop-target);
                         }
+                        root.dragging = -1;
+                        root.drop-target = -1;
                     }
-
-                    Text {
-                        text: row.name;
-                        color: index == Editor.selected ? Palette.selection-foreground : Palette.foreground;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                    }
-
-                    Text {
-                        text: row.group;
-                        color: index == Editor.selected ? Palette.selection-foreground : Palette.foreground;
-                        opacity: 0.7;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        max-width: 90px;
+                }
+                moved => {
+                    if self.pressed && (root.dragging >= 0 || abs(self.mouse-y - self.pressed-y) > 6px) {
+                        root.dragging = row.index;
+                        root.drop-target = max(1, min(Editor.rows.length, position + floor(self.mouse-y / root.row-height + 0.5)));
                     }
                 }
             }
-        }
-    }
 
-    HorizontalLayout {
-        spacing: 6px;
+            HorizontalLayout {
+                padding-left: row.nested ? 32px : 10px;
+                padding-right: 8px;
+                spacing: 6px;
 
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Add text");
-            clicked => {
-                Editor.add-text(@tr("Text"));
-            }
-        }
+                if row.kind == 0: Text {
+                    text: @tr("No group");
+                    color: Palette.foreground;
+                    opacity: 0.7;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
 
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Add image…");
-            clicked => {
-                Editor.add-image();
-            }
-        }
-    }
+                if row.kind == 1: CheckBox {
+                    checked: row.enabled;
+                    toggled => {
+                        Editor.group-enabled(row.index, self.checked);
+                    }
+                }
 
-    HorizontalLayout {
-        spacing: 6px;
+                if row.kind == 1: ComboBox {
+                    width: 64px;
+                    height: 28px;
+                    model: ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+                    current-index: row.number - 1;
+                    selected => {
+                        Editor.group-number(row.index, self.current-index + 1);
+                    }
+                }
 
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Duplicate");
-            enabled: Editor.selected >= 0;
-            clicked => {
-                Editor.duplicate(Editor.selected);
-            }
-        }
+                if row.kind == 1: LineEdit {
+                    min-width: 80px;
+                    height: 28px;
+                    horizontal-stretch: 1;
+                    text: row.name;
+                    edited(value) => {
+                        Editor.group-renamed(row.index, value);
+                    }
+                }
 
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Remove");
-            enabled: Editor.selected >= 0;
-            clicked => {
-                Editor.remove(Editor.selected);
-            }
-        }
-    }
-}
+                if row.kind == 1: Text {
+                    text: row.hotkey;
+                    color: Palette.foreground;
+                    opacity: 0.7;
+                    vertical-alignment: center;
+                }
 
-component GroupList inherits VerticalLayout {
-    spacing: 6px;
-    alignment: start;
-
-    SectionTitle {
-        text: @tr("Groups");
-    }
-
-    Rectangle {
-        height: 112px;
-        border-color: Palette.border;
-        border-width: 1px;
-        border-radius: 4px;
-
-        ListView {
-            x: 1px;
-            y: 1px;
-            width: parent.width - 2px;
-            height: parent.height - 2px;
-
-            for group[index] in Editor.groups: Rectangle {
-                height: 28px;
-                background: index == Editor.selected-group ? Palette.selection-background : transparent;
-
-                TouchArea {
+                if row.kind == 1: RowButton {
+                    width: 72px;
+                    text: row.hold ? @tr("Hold") : @tr("Toggle");
                     clicked => {
-                        Editor.select-group(index);
+                        Editor.group-mode-toggled(row.index);
                     }
                 }
 
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 8px;
-
-                    Text {
-                        text: group.name;
-                        color: index == Editor.selected-group ? Palette.selection-foreground : Palette.foreground;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                    }
-
-                    Text {
-                        text: group.hotkey;
-                        color: index == Editor.selected-group ? Palette.selection-foreground : Palette.foreground;
-                        opacity: 0.7;
-                        vertical-alignment: center;
-                    }
-                }
-            }
-        }
-    }
-
-    HorizontalLayout {
-        spacing: 6px;
-
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Add group");
-            clicked => {
-                Editor.add-group(@tr("Group"));
-            }
-        }
-
-        Button {
-            horizontal-stretch: 1;
-            text: @tr("Remove");
-            enabled: Editor.selected-group >= 0;
-            clicked => {
-                Editor.remove-group(Editor.selected-group);
-            }
-        }
-    }
-
-    if Editor.selected-group >= 0: GridLayout {
-        spacing: 6px;
-
-        Row {
-            FieldLabel {
-                text: @tr("Name");
-            }
-
-            LineEdit {
-                text <=> Editor.group-name;
-                edited(value) => {
-                    Editor.group-renamed(Editor.selected-group, value);
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Hotkey");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                Button {
-                    horizontal-stretch: 1;
-                    text: Editor.recording-group == Editor.selected-group ? @tr("Press a key…") : (Editor.groups[Editor.selected-group].hotkey == "" ? @tr("Record…") : Editor.groups[Editor.selected-group].hotkey);
-                    primary: Editor.recording-group == Editor.selected-group;
+                if row.kind == 1: RowButton {
+                    text: @tr("Delete");
                     clicked => {
-                        Editor.record-hotkey(Editor.selected-group);
+                        Editor.remove-group(row.index);
                     }
                 }
 
-                Button {
-                    text: @tr("Clear");
-                    enabled: Editor.groups[Editor.selected-group].hotkey != "";
+                if row.kind == 2: CheckBox {
+                    checked: row.enabled;
+                    toggled => {
+                        Editor.enabled-toggled(row.index, self.checked);
+                    }
+                }
+
+                if row.kind == 2: Text {
+                    text: row.name;
+                    color: row.index == Editor.selected ? Palette.selection-foreground : Palette.foreground;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                if row.kind == 2: RowButton {
+                    text: @tr("Copy");
                     clicked => {
-                        Editor.clear-hotkey(Editor.selected-group);
-                    }
-                }
-            }
-        }
-    }
-}
-
-component Properties inherits VerticalLayout {
-    spacing: 8px;
-
-    pure function align-name(index: int) -> string {
-        return [
-            @tr("Top left"),
-            @tr("Top"),
-            @tr("Top right"),
-            @tr("Left"),
-            @tr("Center"),
-            @tr("Right"),
-            @tr("Bottom left"),
-            @tr("Bottom"),
-            @tr("Bottom right"),
-        ][index];
-    }
-
-    if Editor.selected < 0: Text {
-        vertical-stretch: 1;
-        text: @tr("Select an overlay to edit it.");
-        color: Palette.foreground;
-        opacity: 0.7;
-        wrap: word-wrap;
-    }
-
-    if Editor.selected >= 0: GridLayout {
-        spacing: 8px;
-
-        Row {
-            FieldLabel {
-                text: @tr("Name");
-            }
-
-            LineEdit {
-                text <=> Editor.name;
-                edited => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        if Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Text");
-                vertical-alignment: top;
-            }
-
-            TextEdit {
-                height: 96px;
-                text <=> Editor.text;
-                edited => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        if Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Font");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                LineEdit {
-                    horizontal-stretch: 1;
-                    min-width: 80px;
-                    text <=> Editor.font;
-                    edited => {
-                        Editor.edited();
+                        Editor.duplicate(row.index);
                     }
                 }
 
-                SpinBox {
-                    width: 84px;
-                    minimum: 1;
-                    maximum: 400;
-                    value <=> Editor.font-size;
-                    edited => {
-                        Editor.edited();
-                    }
-                }
-            }
-        }
-
-        if Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Color");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                Swatch {
-                    value: Editor.color-value;
-                }
-
-                LineEdit {
-                    min-width: 80px;
-                    text <=> Editor.color;
-                    placeholder-text: "#RRGGBBAA";
-                    edited => {
-                        Editor.edited();
-                    }
-                }
-            }
-        }
-
-        if Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Background");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                Swatch {
-                    value: Editor.background-value;
-                }
-
-                LineEdit {
-                    min-width: 80px;
-                    text <=> Editor.background;
-                    placeholder-text: @tr("None");
-                    edited => {
-                        Editor.edited();
-                    }
-                }
-            }
-        }
-
-        if Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Padding");
-            }
-
-            SpinBox {
-                minimum: 0;
-                maximum: 200;
-                value <=> Editor.padding;
-                edited => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        if !Editor.is-text: Row {
-            FieldLabel {
-                text: @tr("Image");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                LineEdit {
-                    horizontal-stretch: 1;
-                    min-width: 80px;
-                    read-only: true;
-                    text: Editor.image-path;
-                }
-
-                Button {
-                    text: @tr("Choose…");
+                if row.kind == 2: RowButton {
+                    text: @tr("Delete");
                     clicked => {
-                        Editor.choose-image();
+                        Editor.remove(row.index);
                     }
                 }
             }
         }
-
-        Row {
-            FieldLabel {
-                text: @tr("Group");
-            }
-
-            ComboBox {
-                height: 32px;
-                model: Editor.group-choices;
-                current-index <=> Editor.group-index;
-                selected => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Anchor");
-            }
-
-            ComboBox {
-                height: 32px;
-                model: [@tr("Application window"), @tr("Monitor showing the application")];
-                current-index <=> Editor.anchor;
-                selected => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Position");
-            }
-
-            ComboBox {
-                height: 32px;
-                model: [
-                    align-name(0),
-                    align-name(1),
-                    align-name(2),
-                    align-name(3),
-                    align-name(4),
-                    align-name(5),
-                    align-name(6),
-                    align-name(7),
-                    align-name(8),
-                ];
-                current-index <=> Editor.align;
-                selected => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Offset");
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-
-                SpinBox {
-                    horizontal-stretch: 1;
-                    min-width: 80px;
-                    minimum: -20000;
-                    maximum: 20000;
-                    value <=> Editor.offset-x;
-                    edited => {
-                        Editor.edited();
-                    }
-                }
-
-                SpinBox {
-                    horizontal-stretch: 1;
-                    min-width: 80px;
-                    minimum: -20000;
-                    maximum: 20000;
-                    value <=> Editor.offset-y;
-                    edited => {
-                        Editor.edited();
-                    }
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Scale (%)");
-            }
-
-            SpinBox {
-                minimum: 5;
-                maximum: 1000;
-                step-size: 5;
-                value <=> Editor.scale;
-                edited => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        Row {
-            FieldLabel {
-                text: @tr("Opacity (%)");
-            }
-
-            SpinBox {
-                minimum: 0;
-                maximum: 100;
-                step-size: 5;
-                value <=> Editor.opacity;
-                edited => {
-                    Editor.edited();
-                }
-            }
-        }
-
-        if Editor.render-error != "": Row {
-            Text {
-                colspan: 2;
-                text: Editor.render-error;
-                color: #e03030;
-                wrap: word-wrap;
-            }
-        }
-    }
-
-    // Keeps the fields at the top.
-    Rectangle {
-        vertical-stretch: 1;
     }
 }
 
@@ -771,6 +351,14 @@ export component OverlayEditor inherits Rectangle {
                     Editor.preview-selected(self.current-index);
                 }
             }
+
+            Button {
+                text: Editor.on-screen ? @tr("Done") : @tr("Edit on screen");
+                primary: true;
+                clicked => {
+                    Editor.toggle-on-screen();
+                }
+            }
         }
 
         HorizontalLayout {
@@ -778,24 +366,45 @@ export component OverlayEditor inherits Rectangle {
             vertical-stretch: 1;
 
             VerticalLayout {
-                width: 260px;
-                spacing: 16px;
+                horizontal-stretch: 1;
+                min-width: 460px;
+                spacing: 8px;
 
-                OverlayList {
+                Hierarchy {
                     vertical-stretch: 1;
                 }
 
-                GroupList {
-                    vertical-stretch: 0;
+                HorizontalLayout {
+                    spacing: 6px;
+
+                    Button {
+                        horizontal-stretch: 1;
+                        text: @tr("+ Text");
+                        clicked => {
+                            Editor.add-text(@tr("Text"));
+                        }
+                    }
+
+                    Button {
+                        horizontal-stretch: 1;
+                        text: @tr("+ Image…");
+                        clicked => {
+                            Editor.add-image();
+                        }
+                    }
+
+                    Button {
+                        horizontal-stretch: 1;
+                        text: @tr("+ Group");
+                        clicked => {
+                            Editor.add-group(@tr("Group"));
+                        }
+                    }
                 }
             }
 
             Canvas {
                 horizontal-stretch: 1;
-            }
-
-            Properties {
-                width: 300px;
             }
         }
     }

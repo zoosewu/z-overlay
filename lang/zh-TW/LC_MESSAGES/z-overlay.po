@@ -251,3 +251,42 @@ msgstr "重試"
 
 msgid "Update and restart"
 msgstr "更新並重新啟動"
+
+msgid "Drag to move · Right-click for details · Esc to finish"
+msgstr "拖曳移動 · 右鍵查看參數 · Esc 結束"
+
+msgid "Done"
+msgstr "完成"
+
+msgid "Edit on screen"
+msgstr "在畫面上編輯"
+
+msgid "+ Text"
+msgstr "+ 文字"
+
+msgid "+ Image…"
+msgstr "+ 圖片…"
+
+msgid "+ Group"
+msgstr "+ 群組"
+
+msgid "Hold"
+msgstr "按住顯示"
+
+msgid "Toggle"
+msgstr "按下切換"
+
+msgid "Copy"
+msgstr "複製"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "Group hotkeys"
+msgstr "群組快捷鍵"
+
+msgid "Start {} first, then edit its overlays on screen."
+msgstr "請先啟動 {}，再到畫面上編輯它的 overlay。"
+
+msgid "Image point"
+msgstr "圖片定位點"

@@ -1,6 +1,6 @@
 use crate::editor::{self, EditorState};
-use crate::host::{ForegroundTracker, OverlayHost, RenderCache};
-use crate::keys;
+use crate::host::{ForegroundTracker, Mode, OverlayHost, RenderCache, image_stamp};
+use crate::keys::{self, HotkeyRecorder, Recorded, hotkey_label};
 use crate::processes::{ProcessChoice, enumerate_processes};
 use crate::updater;
 use crate::{MainWindow, ManagedEntry, PromptKind, Tray};
@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::ptr::null;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -21,7 +21,7 @@ use z_overlay::Result;
 use z_overlay::groups::{GroupToggles, HotkeyPresses};
 use z_overlay::render::Renderer;
 use z_overlay::settings::{
-    Language, ManagedApplication, SETTINGS_FILE_NAME, Settings, portable_dir,
+    GROUP_NUMBERS, Language, ManagedApplication, SETTINGS_FILE_NAME, Settings, portable_dir,
 };
 use z_overlay::system::{
     NamedEvent, set_user_registry_string, startup_command, user_registry_dword, wide,
@@ -30,6 +30,8 @@ use z_overlay::system::{
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "z-overlay";
 const TICK_INTERVAL: Duration = Duration::from_millis(16);
+/// How often the image files in use are checked for changes.
+const FILE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const TRAY_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const TRAY_THEME_INTERVAL: Duration = Duration::from_secs(3);
 const PERSONALIZE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
@@ -39,11 +41,16 @@ pub struct State {
     pub base_dir: PathBuf,
     pub renderer: Renderer,
     pub cache: RenderCache,
-    host: OverlayHost,
+    pub host: OverlayHost,
     tracker: ForegroundTracker,
-    pub toggles: GroupToggles,
+    toggles: GroupToggles,
     presses: HotkeyPresses,
     active: Option<usize>,
+    /// The group number whose hotkey is being recorded.
+    recording: Option<(u8, HotkeyRecorder)>,
+    /// The image files in use as last seen, and when they were last looked at.
+    image_stamps: Vec<Option<(SystemTime, u64)>>,
+    files_checked: Instant,
     running: Vec<ProcessChoice>,
     app_dialog_row: Option<usize>,
     pending_edit: Option<ManagedApplication>,
@@ -100,6 +107,9 @@ pub fn run(start_minimized: bool, show_event: NamedEvent) -> Result<()> {
         toggles: GroupToggles::default(),
         presses: HotkeyPresses::default(),
         active: None,
+        recording: None,
+        image_stamps: Vec::new(),
+        files_checked: Instant::now(),
         running: Vec::new(),
         app_dialog_row: None,
         pending_edit: None,
@@ -158,6 +168,8 @@ fn connect(ui: &MainWindow, state: &Shared) {
     );
     on!(ui, state, on_language_selected, language_selected, index);
     on!(ui, state, on_open_settings_folder, open_settings_folder);
+    on!(ui, state, on_record_number, record_number, number);
+    on!(ui, state, on_clear_number, clear_number, number);
 }
 
 /// Runs every frame: follows the foreground window, reads group hotkeys and
@@ -174,7 +186,15 @@ fn tick(ui: &slint::Weak<MainWindow>, state: &Shared) {
         return;
     };
     let state = &mut *state;
-    editor::poll_recording(&ui, state);
+    poll_recording(&ui, state);
+    if state.files_checked.elapsed() >= FILE_CHECK_INTERVAL {
+        state.files_checked = Instant::now();
+        check_image_files(&ui, state);
+    }
+    // While overlays are edited on screen, the editor runs them.
+    if editor::tick(&ui, state) {
+        return;
+    }
 
     let foreground = state.tracker.update(&state.settings.apps);
     let active = foreground.map(|foreground| foreground.app);
@@ -186,19 +206,119 @@ fn tick(ui: &slint::Weak<MainWindow>, state: &Shared) {
             .map_or("", |app| app.display_name());
         ui.set_active_name(name.into());
     }
-    if let Some(app) = active.and_then(|index| state.settings.apps.get(index)) {
-        for group in state.presses.poll(app, keys::is_down) {
-            state.toggles.toggle(app, group);
+    match active.and_then(|index| state.settings.apps.get(index)) {
+        Some(app) => {
+            let hotkeys = state.presses.poll(&state.settings.hotkeys, keys::is_down);
+            for number in hotkeys.pressed {
+                state.toggles.press(app, number);
+            }
+            state.toggles.set_held(hotkeys.held);
         }
+        None => state.toggles.set_held(Default::default()),
     }
     state.host.update(
         foreground,
         &state.settings,
-        &state.toggles,
+        Mode::Normal(&state.toggles),
         &mut state.cache,
         &state.renderer,
         &state.base_dir,
     );
+}
+
+/// Redraws the overlays whose image file was saved again.
+fn check_image_files(ui: &MainWindow, state: &mut State) {
+    let stamps: Vec<_> = state
+        .settings
+        .apps
+        .iter()
+        .flat_map(|app| &app.overlays)
+        .map(|overlay| image_stamp(&state.base_dir, overlay))
+        .collect();
+    if stamps != state.image_stamps {
+        state.image_stamps = stamps;
+        state.host.reset();
+        editor::refresh_previews(ui, state);
+    }
+}
+
+fn record_number(ui: &MainWindow, state: &Shared, number: i32) {
+    let mut state = state.borrow_mut();
+    let Ok(number) = u8::try_from(number) else {
+        return;
+    };
+    // A second click stops recording.
+    if state
+        .recording
+        .as_ref()
+        .is_some_and(|(recording, _)| *recording == number)
+    {
+        state.recording = None;
+        ui.set_recording_number(-1);
+        return;
+    }
+    state.recording = Some((number, HotkeyRecorder::default()));
+    ui.set_recording_number(i32::from(number));
+}
+
+fn clear_number(ui: &MainWindow, state: &Shared, number: i32) {
+    let mut state = state.borrow_mut();
+    state.recording = None;
+    ui.set_recording_number(-1);
+    set_number_hotkey(ui, &mut state, number, None);
+}
+
+fn set_number_hotkey(
+    ui: &MainWindow,
+    state: &mut State,
+    number: i32,
+    hotkey: Option<z_overlay::settings::Hotkey>,
+) {
+    let Some(slot) = usize::try_from(number - 1)
+        .ok()
+        .and_then(|index| state.settings.hotkeys.get_mut(index))
+    else {
+        return;
+    };
+    *slot = hotkey;
+    save_settings(ui, state);
+    sync_number_hotkeys(ui, state);
+    editor::refresh_rows(ui, state);
+}
+
+/// Finishes recording once a hotkey is pressed.
+fn poll_recording(ui: &MainWindow, state: &mut State) {
+    let Some((number, recorder)) = &mut state.recording else {
+        return;
+    };
+    let number = i32::from(*number);
+    match recorder.poll() {
+        Recorded::Waiting => {}
+        Recorded::Canceled => {
+            state.recording = None;
+            ui.set_recording_number(-1);
+        }
+        Recorded::Key(hotkey) => {
+            state.recording = None;
+            ui.set_recording_number(-1);
+            set_number_hotkey(ui, state, number, Some(hotkey));
+        }
+    }
+}
+
+pub fn sync_number_hotkeys(ui: &MainWindow, state: &State) {
+    let labels: Vec<slint::SharedString> = (1..=GROUP_NUMBERS)
+        .map(|number| {
+            state
+                .settings
+                .hotkey(number)
+                .as_ref()
+                .map(hotkey_label)
+                .unwrap_or_default()
+                .into()
+        })
+        .collect();
+    ui.set_number_hotkeys(ModelRc::new(VecModel::from(labels)));
 }
 
 fn add_clicked(ui: &MainWindow, state: &Shared) {
@@ -448,6 +568,7 @@ pub fn sync_settings(ui: &MainWindow, state: &State) {
     ui.set_start_minimized(state.settings.start_minimized);
     ui.set_language_index(language_index(state.settings.language));
     ui.set_settings_folder(state.base_dir.display().to_string().into());
+    sync_number_hotkeys(ui, state);
 }
 
 /// Refreshes the application list, keeping the selection.

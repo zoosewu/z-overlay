@@ -18,14 +18,15 @@ Download `z-overlay.exe` from the [latest release](https://github.com/zoosewu/z-
 
 1. Launch `z-overlay.exe`.
 2. On the **Applications** tab, select **Add…** and pick a running application or enter its path or executable name. Optionally enter a display name. Select **Save** to open its overlays.
-3. In the overlay editor:
-   - **Add text** or **Add image…** (PNG, JPEG, WebP or SVG). Drag an overlay on the preview to place it, or set its **Position** and **Offset**. The offset is measured from the chosen corner, edge or centre, so the overlay keeps its place when the window is resized.
-   - **Anchor** places the overlay in the **Application window** or on the **Monitor showing the application**.
-   - Clear an overlay's check box to turn it off. **Duplicate** copies the selected overlay.
-   - **Add group**, name it and **Record…** a hotkey. Put overlays in the group with **Group**. While the application is in front, the hotkey shows or hides the group's overlays; each group toggles on its own, and all groups start hidden. Overlays in no group are always shown.
-   - The preview size at the top right only changes the preview.
+3. In the overlay editor, the list on the left holds the overlays: first those in no group, then each group with its overlays. The preview on the right shows how they sit in a window of the chosen size.
+   - **+ Text** or **+ Image…** (PNG, JPEG, WebP or SVG). [`samples/crosshair.svg`](samples/crosshair.svg) is a crosshair whose length, thickness, centre gap and colour are set at the top of the file.
+   - Each overlay's row has a check box to turn it on or off, **Copy** and **Delete**. Drag a row to move the overlay into another group or change its order.
+   - Right-click an overlay, in the list, the preview or on screen, for its details: text and colours, **Anchor** (**Application window** or **Monitor showing the application**), **Position** (the point of that area it is placed from), **Image point** (the point of the overlay placed there, which stays put when the overlay changes size), **Offset**, **Scale** and **Opacity**.
+   - **Edit on screen** shows every overlay over the application itself; drag them into place, right-click for details, and press Esc or **Done** to finish. Dragging in the preview works too.
+   - **+ Group** adds a group. Each group's row has a check box to turn it on or off, its number, its name, the hotkey of its number, a button that switches between **Toggle** (each press shows or hides it; groups start hidden) and **Hold** (shown while the hotkey is held), and **Delete**. Overlays in no group are always shown.
+   - Image files in use are checked every second, so an image saved again shows at once.
 4. Select **Overlays…**, **Edit…** or **Remove** on the **Applications** tab to change an application later. Double-click an application to open its overlays.
-5. On the **Settings** tab, enable **Start with Windows** and optionally **Start minimized to the tray**, choose a **Language**, or **Open** the settings folder.
+5. On the **Settings** tab, set the **Group hotkeys** for numbers 1 to 9 (Ctrl+1 to Ctrl+9 at first; they apply to every application), enable **Start with Windows** and optionally **Start minimized to the tray**, choose a **Language**, or **Open** the settings folder.
 
 Settings are saved immediately to `settings.json` beside `z-overlay.exe`, and added images are copied into the `images` folder beside it, so the folder can be moved or copied as a whole. The folder must be writable. Moving it while **Start with Windows** is on is fine: the startup entry is updated the next time z-overlay starts.
 

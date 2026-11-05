@@ -9,9 +9,10 @@ import {
     TabWidget,
 } from "std-widgets.slint";
 import { Tray } from "tray.slint";
-import { Editor, GroupRow, OverlayEditor, OverlayRow } from "editor.slint";
+import { Editor, OverlayEditor, OverlayRow, TreeRow } from "editor.slint";
+import { Inspector, InspectorWindow } from "inspector.slint";
 
-export { Tray, Editor, GroupRow, OverlayRow }
+export { Tray, Editor, OverlayRow, TreeRow, Inspector, InspectorWindow }
 
 export enum PromptKind {
     closed,
@@ -21,6 +22,7 @@ export enum PromptKind {
     startup-failed,
     image-failed,
     open-failed,
+    app-not-running,
     identity-empty,
     identity-duplicate,
     confirm-edit,
@@ -55,6 +57,9 @@ export component MainWindow inherits Window {
     in-out property <bool> start-minimized;
     in-out property <int> language-index;
     in property <string> settings-folder;
+    // The hotkey of each group number, 1 first.
+    in property <[string]> number-hotkeys;
+    in property <int> recording-number: -1;
     in property <string> version;
     in property <string> update-version;
     in-out property <UpdateState> update-state;
@@ -85,6 +90,8 @@ export component MainWindow inherits Window {
     callback start-minimized-toggled(enabled: bool);
     callback language-selected(index: int);
     callback open-settings-folder();
+    callback record-number(number: int);
+    callback clear-number(number: int);
     callback update-clicked();
 
     pure function summary(entry: ManagedEntry) -> string {
@@ -122,6 +129,9 @@ export component MainWindow inherits Window {
         }
         if kind == PromptKind.open-failed {
             return @tr("Could not open the folder.\n\n{}", detail);
+        }
+        if kind == PromptKind.app-not-running {
+            return @tr("Start {} first, then edit its overlays on screen.", detail);
         }
         if kind == PromptKind.identity-empty {
             return @tr("Enter an application path or executable name, or select a running application.");
@@ -333,6 +343,46 @@ export component MainWindow inherits Window {
                                 current-index <=> root.language-index;
                                 selected(value) => {
                                     root.language-selected(self.current-index);
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Group hotkeys");
+                            color: Palette.foreground;
+                        }
+
+                        GridLayout {
+                            spacing: 8px;
+
+                            for label[slot] in root.number-hotkeys: HorizontalLayout {
+                                row: slot / 3;
+                                col: mod(slot, 3);
+                                spacing: 6px;
+
+                                Text {
+                                    width: 14px;
+                                    text: slot + 1;
+                                    color: Palette.foreground;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+
+                                Button {
+                                    horizontal-stretch: 1;
+                                    text: root.recording-number == slot + 1 ? @tr("Press a key…") : (label == "" ? @tr("Record…") : label);
+                                    primary: root.recording-number == slot + 1;
+                                    clicked => {
+                                        root.record-number(slot + 1);
+                                    }
+                                }
+
+                                Button {
+                                    text: "✕";
+                                    enabled: label != "";
+                                    clicked => {
+                                        root.clear-number(slot + 1);
+                                    }
                                 }
                             }
                         }

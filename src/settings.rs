@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 pub const IMAGES_DIR_NAME: &str = "images";
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+/// How many group numbers, and so number hotkeys, there are.
+pub const GROUP_NUMBERS: u8 = 9;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
     #[serde(default)]
     pub apps: Vec<ManagedApplication>,
@@ -16,9 +19,46 @@ pub struct Settings {
     pub start_minimized: bool,
     #[serde(default)]
     pub language: Language,
+    /// The hotkey of each group number, 1 first; shared by every application.
+    #[serde(default = "default_hotkeys")]
+    pub hotkeys: Vec<Option<Hotkey>>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            apps: Vec::new(),
+            start_with_windows: false,
+            start_minimized: false,
+            language: Language::default(),
+            hotkeys: default_hotkeys(),
+        }
+    }
+}
+
+/// Ctrl+1 to Ctrl+9.
+pub fn default_hotkeys() -> Vec<Option<Hotkey>> {
+    (1..=GROUP_NUMBERS)
+        .map(|number| {
+            Some(Hotkey {
+                ctrl: true,
+                alt: false,
+                shift: false,
+                key: u16::from(b'0' + number),
+            })
+        })
+        .collect()
 }
 
 impl Settings {
+    /// The hotkey of a group number, if it has one.
+    pub fn hotkey(&self, number: u8) -> Option<Hotkey> {
+        self.hotkeys
+            .get(usize::from(number).checked_sub(1)?)
+            .copied()
+            .flatten()
+    }
+
     pub fn load_from(path: &Path) -> Result<Self> {
         load_json(path)
     }
@@ -97,15 +137,41 @@ impl ManagedApplication {
         self.groups.iter().find(|group| group.id == id)
     }
 
-    /// Adds a group with the next free id and returns its index.
+    /// Adds a group with the next free id and the lowest unused number, and
+    /// returns its index.
     pub fn add_group(&mut self, name: String) -> usize {
         let id = self.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
+        let number = (1..=GROUP_NUMBERS)
+            .find(|number| self.groups.iter().all(|group| group.number != *number))
+            .unwrap_or(1);
         self.groups.push(Group {
             id,
             name,
-            hotkey: None,
+            number,
+            enabled: true,
+            mode: GroupMode::Toggle,
         });
         self.groups.len() - 1
+    }
+
+    /// Moves an overlay so it sits before the overlay now at `before` (or
+    /// last, for `None`) and belongs to `group`. Returns its new index.
+    pub fn move_overlay(
+        &mut self,
+        from: usize,
+        before: Option<usize>,
+        group: Option<u32>,
+    ) -> usize {
+        let mut overlay = self.overlays.remove(from);
+        overlay.group = group;
+        let index = match before {
+            Some(before) if before > from => before - 1,
+            Some(before) => before,
+            None => self.overlays.len(),
+        }
+        .min(self.overlays.len());
+        self.overlays.insert(index, overlay);
+        index
     }
 
     /// Removes a group; its overlays stay, no longer in any group.
@@ -148,8 +214,27 @@ fn normalize_name(value: &str) -> String {
 pub struct Group {
     pub id: u32,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hotkey: Option<Hotkey>,
+    /// Which number hotkey shows the group, 1 to `GROUP_NUMBERS`.
+    #[serde(default = "first_number")]
+    pub number: u8,
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: GroupMode,
+}
+
+fn first_number() -> u8 {
+    1
+}
+
+/// What the group's hotkey does.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum GroupMode {
+    /// Each press shows or hides the group.
+    #[default]
+    Toggle,
+    /// The group shows while the hotkey is held.
+    Hold,
 }
 
 /// A virtual-key code plus the modifiers that must be held with it; every
@@ -175,8 +260,13 @@ pub struct Overlay {
     pub content: Content,
     #[serde(default)]
     pub anchor: Anchor,
+    /// The point of the anchor area the overlay is placed from.
     #[serde(default)]
     pub align: Align,
+    /// The point of the overlay that sits there; it stays put when the
+    /// overlay changes size. Unset means the same point as `align`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<Align>,
     #[serde(default)]
     pub offset: [i32; 2],
     #[serde(default = "one")]
@@ -210,10 +300,16 @@ impl Overlay {
             content,
             anchor: Anchor::Window,
             align: Align::TopLeft,
+            pivot: None,
             offset: [16, 16],
             scale: 1.0,
             opacity: 1.0,
         }
+    }
+
+    /// The point of the overlay that is placed.
+    pub fn pivot(&self) -> Align {
+        self.pivot.unwrap_or(self.align)
     }
 }
 
@@ -494,12 +590,9 @@ mod tests {
     fn settings_round_trip_as_json() {
         let mut app = ManagedApplication::new(r"C:\Games\game.exe".into(), Some("Game".into()));
         let group = app.add_group("Map".into());
-        app.groups[group].hotkey = Some(Hotkey {
-            ctrl: true,
-            alt: false,
-            shift: false,
-            key: 0x70,
-        });
+        app.groups[group].number = 3;
+        app.groups[group].mode = GroupMode::Hold;
+        app.groups[group].enabled = false;
         let mut text = Overlay::text("Hint".into(), "Hello\n世界".into());
         text.group = Some(app.groups[group].id);
         text.align = Align::BottomRight;
@@ -512,6 +605,15 @@ mod tests {
             start_with_windows: true,
             start_minimized: true,
             language: Language::TraditionalChinese,
+            hotkeys: vec![
+                None,
+                Some(Hotkey {
+                    ctrl: false,
+                    alt: true,
+                    shift: false,
+                    key: 0x70,
+                }),
+            ],
         };
 
         let dir = temp_dir("round-trip");
@@ -551,6 +653,78 @@ mod tests {
         };
         assert_eq!(style.color, Color::white());
         assert_eq!(style.background, None);
+        // Number hotkeys default to Ctrl+1 to Ctrl+9.
+        assert_eq!(settings.hotkeys.len(), 9);
+        assert_eq!(
+            settings.hotkey(9),
+            Some(Hotkey {
+                ctrl: true,
+                alt: false,
+                shift: false,
+                key: 0x39,
+            })
+        );
+        assert_eq!(settings.hotkey(0), None);
+        assert_eq!(settings.hotkey(10), None);
+    }
+
+    #[test]
+    fn groups_from_before_numbers_load_as_enabled_toggles() {
+        let group: Group =
+            serde_json::from_str(r#"{"id":4,"name":"Old","hotkey":{"key":119}}"#).unwrap();
+        assert_eq!(
+            (group.number, group.enabled, group.mode),
+            (1, true, GroupMode::Toggle)
+        );
+    }
+
+    #[test]
+    fn new_groups_take_the_lowest_unused_number() {
+        let mut app = ManagedApplication::new("a.exe".into(), None);
+        let numbers =
+            |app: &ManagedApplication| app.groups.iter().map(|g| g.number).collect::<Vec<_>>();
+        app.add_group("a".into());
+        app.add_group("b".into());
+        app.add_group("c".into());
+        assert_eq!(numbers(&app), [1, 2, 3]);
+        app.remove_group(1);
+        app.add_group("d".into());
+        assert_eq!(numbers(&app), [1, 3, 2]);
+        for _ in 0..7 {
+            app.add_group("more".into());
+        }
+        // Once every number is taken, new groups share number 1.
+        assert_eq!(app.groups.last().unwrap().number, 1);
+    }
+
+    #[test]
+    fn moving_an_overlay_regroups_and_reorders_it() {
+        let mut app = ManagedApplication::new("a.exe".into(), None);
+        for name in ["a", "b", "c", "d"] {
+            app.overlays.push(Overlay::text(name.into(), name.into()));
+        }
+        let names = |app: &ManagedApplication| {
+            app.overlays
+                .iter()
+                .map(|o| o.name.clone())
+                .collect::<Vec<_>>()
+                .join("")
+        };
+
+        // Down: before "d" means after "c" once "a" is out of the way.
+        assert_eq!(app.move_overlay(0, Some(3), Some(7)), 2);
+        assert_eq!(names(&app), "bcad");
+        assert_eq!(app.overlays[2].group, Some(7));
+        // Up.
+        assert_eq!(app.move_overlay(3, Some(0), None), 0);
+        assert_eq!(names(&app), "dbca");
+        // To the end.
+        assert_eq!(app.move_overlay(0, None, None), 3);
+        assert_eq!(names(&app), "bcad");
+        // Onto itself changes only the group.
+        assert_eq!(app.move_overlay(1, Some(1), Some(2)), 1);
+        assert_eq!(names(&app), "bcad");
+        assert_eq!(app.overlays[1].group, Some(2));
     }
 
     #[test]

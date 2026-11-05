@@ -1,0 +1,375 @@
+import {
+    Button,
+    ComboBox,
+    LineEdit,
+    Palette,
+    SpinBox,
+    TextEdit,
+} from "std-widgets.slint";
+
+// The details of one overlay, shown in their own window.
+export global Inspector {
+    in-out property <string> name;
+    in property <bool> is-text;
+    in-out property <string> text;
+    in-out property <string> font;
+    in-out property <int> font-size;
+    in-out property <string> color;
+    in property <color> color-value;
+    in-out property <string> background;
+    in property <color> background-value;
+    in-out property <int> padding;
+    in property <string> image-path;
+    in property <string> render-error;
+    in-out property <int> anchor;
+    in-out property <int> align;
+    in-out property <int> pivot;
+    in-out property <int> offset-x;
+    in-out property <int> offset-y;
+    in-out property <int> scale;
+    in-out property <int> opacity;
+
+    callback edited();
+    callback choose-image();
+}
+
+component FieldLabel inherits Text {
+    color: Palette.foreground;
+    vertical-alignment: center;
+}
+
+component Swatch inherits Rectangle {
+    in property <color> value;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.border;
+    // A checker behind the colour shows its transparency.
+    clip: true;
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 12px;
+        height: 12px;
+        background: #ccc;
+    }
+
+    Rectangle {
+        x: 12px;
+        y: 12px;
+        width: 12px;
+        height: 12px;
+        background: #ccc;
+    }
+
+    Rectangle {
+        background: root.value;
+    }
+}
+
+export component InspectorWindow inherits Window {
+    title: Inspector.name;
+    icon: @image-url("../assets/z-overlay.png");
+    always-on-top: true;
+    width: 360px;
+
+    pure function align-name(index: int) -> string {
+        return [
+            @tr("Top left"),
+            @tr("Top"),
+            @tr("Top right"),
+            @tr("Left"),
+            @tr("Center"),
+            @tr("Right"),
+            @tr("Bottom left"),
+            @tr("Bottom"),
+            @tr("Bottom right"),
+        ][index];
+    }
+
+    GridLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        Row {
+            FieldLabel {
+                text: @tr("Name");
+            }
+
+            LineEdit {
+                text <=> Inspector.name;
+                edited => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        if Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Text");
+                vertical-alignment: top;
+            }
+
+            TextEdit {
+                height: 96px;
+                text <=> Inspector.text;
+                edited => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        if Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Font");
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    min-width: 80px;
+                    text <=> Inspector.font;
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+
+                SpinBox {
+                    width: 84px;
+                    minimum: 1;
+                    maximum: 400;
+                    value <=> Inspector.font-size;
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+            }
+        }
+
+        if Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Color");
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                Swatch {
+                    value: Inspector.color-value;
+                }
+
+                LineEdit {
+                    min-width: 80px;
+                    text <=> Inspector.color;
+                    placeholder-text: "#RRGGBBAA";
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+            }
+        }
+
+        if Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Background");
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                Swatch {
+                    value: Inspector.background-value;
+                }
+
+                LineEdit {
+                    min-width: 80px;
+                    text <=> Inspector.background;
+                    placeholder-text: @tr("None");
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+            }
+        }
+
+        if Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Padding");
+            }
+
+            SpinBox {
+                minimum: 0;
+                maximum: 200;
+                value <=> Inspector.padding;
+                edited => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        if !Inspector.is-text: Row {
+            FieldLabel {
+                text: @tr("Image");
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    min-width: 80px;
+                    read-only: true;
+                    text: Inspector.image-path;
+                }
+
+                Button {
+                    text: @tr("Choose…");
+                    clicked => {
+                        Inspector.choose-image();
+                    }
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Anchor");
+            }
+
+            ComboBox {
+                height: 32px;
+                model: [@tr("Application window"), @tr("Monitor showing the application")];
+                current-index <=> Inspector.anchor;
+                selected => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Position");
+            }
+
+            ComboBox {
+                height: 32px;
+                model: [
+                    align-name(0),
+                    align-name(1),
+                    align-name(2),
+                    align-name(3),
+                    align-name(4),
+                    align-name(5),
+                    align-name(6),
+                    align-name(7),
+                    align-name(8),
+                ];
+                current-index <=> Inspector.align;
+                selected => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Image point");
+            }
+
+            ComboBox {
+                height: 32px;
+                model: [
+                    align-name(0),
+                    align-name(1),
+                    align-name(2),
+                    align-name(3),
+                    align-name(4),
+                    align-name(5),
+                    align-name(6),
+                    align-name(7),
+                    align-name(8),
+                ];
+                current-index <=> Inspector.pivot;
+                selected => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Offset");
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                SpinBox {
+                    horizontal-stretch: 1;
+                    min-width: 80px;
+                    minimum: -20000;
+                    maximum: 20000;
+                    value <=> Inspector.offset-x;
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+
+                SpinBox {
+                    horizontal-stretch: 1;
+                    min-width: 80px;
+                    minimum: -20000;
+                    maximum: 20000;
+                    value <=> Inspector.offset-y;
+                    edited => {
+                        Inspector.edited();
+                    }
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Scale (%)");
+            }
+
+            SpinBox {
+                minimum: 5;
+                maximum: 1000;
+                step-size: 5;
+                value <=> Inspector.scale;
+                edited => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        Row {
+            FieldLabel {
+                text: @tr("Opacity (%)");
+            }
+
+            SpinBox {
+                minimum: 0;
+                maximum: 100;
+                step-size: 5;
+                value <=> Inspector.opacity;
+                edited => {
+                    Inspector.edited();
+                }
+            }
+        }
+
+        if Inspector.render-error != "": Row {
+            Text {
+                colspan: 2;
+                text: Inspector.render-error;
+                color: #e03030;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

@@ -454,6 +454,62 @@ mod tests {
     }
 
     #[test]
+    fn sample_crosshair_uses_the_values_at_its_top() {
+        // Read the values back from the file, so editing them keeps this passing.
+        let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples");
+        let svg = std::fs::read_to_string(samples.join("crosshair.svg")).unwrap();
+        let entity = |name: &str| {
+            let start = svg.find(&format!("<!ENTITY {name} \"")).unwrap() + name.len() + 11;
+            svg[start..start + svg[start..].find('"').unwrap()].to_string()
+        };
+        let length: u32 = entity("length").parse().unwrap();
+        let [r, g, b, a] = Color::parse(&entity("color")).unwrap().rgba();
+
+        let content = Content::Image {
+            path: "crosshair.svg".into(),
+        };
+        let pixmap = renderer().render(&content, &samples, 1.0).unwrap();
+        assert_eq!((pixmap.width(), pixmap.height()), (length, length));
+        let pixel = |x: u32, y: u32| {
+            let index = (y * length + x) as usize * 4;
+            pixmap.data()[index..index + 4].to_vec()
+        };
+        // The vertical bar crosses the top edge in the middle, in the chosen colour.
+        let bar = [length / 2 - 1, length / 2]
+            .into_iter()
+            .map(|x| pixel(x, 0))
+            .find(|p| p[3] > 0)
+            .expect("the vertical bar reaches the top edge");
+        let premultiplied = |c: u8| ((c as u32 * a as u32 + 127) / 255) as u8;
+        for (actual, expected) in
+            bar.iter()
+                .zip([premultiplied(r), premultiplied(g), premultiplied(b), a])
+        {
+            assert!(
+                actual.abs_diff(expected) <= 1,
+                "{bar:?} vs #{r:02x}{g:02x}{b:02x}{a:02x}"
+            );
+        }
+        assert_eq!(pixel(0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(length - 1, length - 1), [0, 0, 0, 0]);
+        // The middle is left empty for `gap` pixels around the centre; the
+        // lines start again just beyond it, on every side.
+        let gap: u32 = entity("gap").parse().unwrap();
+        let centre = length / 2;
+        let at_column = |y: u32| [centre - 1, centre].into_iter().any(|x| pixel(x, y)[3] > 0);
+        let at_row = |x: u32| [centre - 1, centre].into_iter().any(|y| pixel(x, y)[3] > 0);
+        if gap > 0 {
+            assert!(!at_column(centre) && !at_row(centre), "the centre is empty");
+        }
+        for beyond in [centre - gap - 2, centre + gap + 2] {
+            assert!(
+                at_column(beyond) && at_row(beyond),
+                "lines resume at {beyond}"
+            );
+        }
+    }
+
+    #[test]
     fn a_missing_image_is_an_error_naming_the_file() {
         let error = renderer()
             .render(

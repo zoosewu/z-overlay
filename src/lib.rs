@@ -1,4 +1,5 @@
 pub mod groups;
+pub mod hierarchy;
 pub mod placement;
 pub mod render;
 pub mod settings;
