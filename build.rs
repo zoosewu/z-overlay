@@ -13,7 +13,7 @@ fn main() {
             .set("ProductName", "z-overlay")
             .set("FileDescription", "z-overlay")
             .set("CompanyName", "zoosewu")
-            .set("LegalCopyright", "Copyright (c) 2026 zoosewu. MIT License.")
+            .set("LegalCopyright", "Copyright (c) 2026 zoosewu. GNU AGPL-3.0.")
             .set("OriginalFilename", "z-overlay.exe")
             .set("InternalName", "z-overlay")
             .compile()

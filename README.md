@@ -53,3 +53,7 @@ The icons are drawn by `tools/make-icons.py` (requires Pillow):
 ```powershell
 python tools/make-icons.py assets
 ```
+
+## License
+
+The code is licensed under the [GNU AGPL-3.0](LICENSE). Its Rust dependencies are under their own licenses.
