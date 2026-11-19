@@ -1,0 +1,6 @@
+{
+  "01-overlay-editor": { "zh-TW": "Overlay 編輯器：群組與 overlay 的階層清單，右側預覽", "en": "Overlay editor: overlays and groups as a hierarchy, with a preview" },
+  "02-overlay-details": { "zh-TW": "按右鍵開啟 overlay 的詳細參數", "en": "Right-click an overlay for its details" },
+  "03-applications": { "zh-TW": "依應用程式管理 overlay", "en": "Overlays managed per application" },
+  "04-settings": { "zh-TW": "設定：開機啟動、語言與群組快捷鍵", "en": "Settings: startup, language and group hotkeys" }
+}

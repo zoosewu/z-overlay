@@ -48,6 +48,12 @@ Interface strings are marked with `@tr` in `ui/*.slint`. Traditional Chinese tra
 slint-tr-extractor --no-default-translation-context -o z-overlay.pot ui/app.slint ui/editor.slint ui/tray.slint
 ```
 
+The screenshots in `docs/screenshots/` are drawn off screen from demo data:
+
+```powershell
+cargo run --example screenshots
+```
+
 The icons are drawn by `tools/make-icons.py` (requires Pillow):
 
 ```powershell

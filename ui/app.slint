@@ -12,7 +12,8 @@ import { Tray } from "tray.slint";
 import { Editor, OverlayEditor, OverlayRow, TreeRow } from "editor.slint";
 import { Inspector, InspectorWindow } from "inspector.slint";
 
-export { Tray, Editor, OverlayRow, TreeRow, Inspector, InspectorWindow }
+// Palette is exported so tools/screenshots can pick the colour scheme.
+export { Tray, Editor, OverlayRow, TreeRow, Inspector, InspectorWindow, Palette }
 
 export enum PromptKind {
     closed,
@@ -65,6 +66,8 @@ export component MainWindow inherits Window {
     in-out property <UpdateState> update-state;
     in property <string> update-error;
 
+    // The open tab: 0 applications, 1 settings.
+    in-out property <int> tab;
     in-out property <bool> overlay-editor-open;
 
     in-out property <bool> app-dialog-open;
@@ -167,6 +170,7 @@ export component MainWindow inherits Window {
         spacing: 8px;
 
         TabWidget {
+            current-index <=> root.tab;
             vertical-stretch: 1;
 
             Tab {
@@ -378,7 +382,7 @@ export component MainWindow inherits Window {
                                 }
 
                                 Button {
-                                    text: "✕";
+                                    text: @tr("Clear");
                                     enabled: label != "";
                                     clicked => {
                                         root.clear-number(slot + 1);
